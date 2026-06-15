@@ -2,7 +2,7 @@ name: Project Deployment
 
 on:
   push:
-    branches: [main]
+    branches: [main] 
     paths:
       - "Project/app/**"
       - "Project/Terraform/**"
