@@ -1,0 +1,74 @@
+name: Project Deployment
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "Project/app/**"
+      - "Project/Terraform/**"
+      - "Project/.github/workflows/deploy.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # required for OIDC login to Azure
+  contents: read
+
+env:
+  APP_DIR: Project/app
+  TF_DIR: Project/Terraform
+  IMAGE_NAME: fastapi-app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Authenticate to Azure. Uses OIDC federated credentials (recommended).
+      # Set these repository secrets: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      # Terraform uses the Azure CLI credentials from the login step above.
+      - name: Terraform Init
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform init
+
+      - name: terraform plan  
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform plan
+        
+      - name: Terraform Apply
+        working-directory: ${{ env.TF_DIR }}
+        run: terraform apply -auto-approve
+
+      - name: Read ACR login server
+        id: tf
+        working-directory: ${{ env.TF_DIR }}
+        run: echo "acr_login_server=$(terraform output -raw acr_login_server)" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to ACR
+        run: az acr login --name "${{ steps.tf.outputs.acr_login_server }}"
+
+      - name: Build and push image
+        working-directory: ${{ env.APP_DIR }}
+        env:
+          ACR: ${{ steps.tf.outputs.acr_login_server }}
+        run: |
+          docker build -t "$ACR/$IMAGE_NAME:${{ github.sha }}" -t "$ACR/$IMAGE_NAME:latest" .
+          docker push "$ACR/$IMAGE_NAME:${{ github.sha }}"
+          docker push "$ACR/$IMAGE_NAME:latest"
+
+      - name: Image summary
+        run: |
+          echo "Pushed: ${{ steps.tf.outputs.acr_login_server }}/$IMAGE_NAME:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
