@@ -6,7 +6,7 @@ on:
     paths:
       - "Project/app/**"
       - "Project/Terraform/**"
-      - "Project/.github/workflows/deploy.yml"
+      - ".github/workflows/deploy.yml"
   workflow_dispatch:
 
 permissions:
