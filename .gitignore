@@ -5,7 +5,7 @@
 
 # State files - may contain secrets, keep out of git
 *.tfstate
-*.tfstate.*
+*.tfstate.* 
 
 # Crash logs
 crash.log
