@@ -7,5 +7,5 @@ variable "location" {
 }
 
 variable "acr_name" {
-  default = "fastapiacr12345"
+  default = "fastapiacrkhayyoom"
 }
