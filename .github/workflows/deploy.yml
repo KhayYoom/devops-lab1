@@ -46,23 +46,19 @@ jobs:
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
         run: terraform init -input=false
 
-      - name: Terraform Plan
+      # Phase 1: create only the registry (and its RG) so we have somewhere
+      # to push the image before the Container App (which needs that image) exists.
+      - name: Terraform Apply (registry)
         working-directory: ${{ env.TF_DIR }}
         env:
           ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
           ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
           ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
           ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        run: terraform plan -out=tfplan
-
-      - name: Terraform Apply
-        working-directory: ${{ env.TF_DIR }}
-        env:
-          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-        run: terraform apply -auto-approve tfplan
+        run: |
+          terraform apply -auto-approve -input=false \
+            -target=azurerm_resource_group.rg \
+            -target=azurerm_container_registry.acr
 
       - name: Read ACR login server
         id: tf
@@ -83,6 +79,23 @@ jobs:
           docker push "$ACR/$IMAGE_NAME:${{ github.sha }}"
           docker push "$ACR/$IMAGE_NAME:latest"
 
-      - name: Image summary
+      # Phase 2: apply the full stack now that the image exists, deploying the
+      # freshly pushed commit-tagged image to the Container App.
+      - name: Terraform Apply (full)
+        working-directory: ${{ env.TF_DIR }}
+        env:
+          ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+        run: terraform apply -auto-approve -input=false -var "image_tag=${{ github.sha }}"
+
+      - name: Read app URL
+        id: app
+        working-directory: ${{ env.TF_DIR }}
+        run: echo "url=$(terraform output -raw container_app_url)" >> "$GITHUB_OUTPUT"
+
+      - name: Deployment summary
         run: |
-          echo "Pushed: ${{ steps.tf.outputs.acr_login_server }}/$IMAGE_NAME:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Image:** ${{ steps.tf.outputs.acr_login_server }}/$IMAGE_NAME:${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**App URL:** ${{ steps.app.outputs.url }}" >> "$GITHUB_STEP_SUMMARY"
